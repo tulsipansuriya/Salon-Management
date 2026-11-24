@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
 import { useLanguage } from '../i18n/LanguageContext'
+import { API_BASE } from '../lib/api'
 import './display.css'
-
-const API_BASE = 'http://localhost:3001'
 type DisplayData = {
   barbers: { id: string; name: string; status: 'Free' | 'Busy' | 'On Break'; currentCustomer: null | { id: string; token: string; status: 'Called' | 'In Chair'; calledAt: string | null; flashUntil: string | null } }[]
   upNext: { id: string; token: string; services: { id: string; nameEn: string; nameGu: string }[]; estimatedWaitMinutes: number }[]

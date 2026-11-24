@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { io } from 'socket.io-client'
 import { useLanguage } from '../i18n/LanguageContext'
+import { API_BASE } from '../lib/api'
 import './admin.css'
-
-const API_BASE = 'http://localhost:3001'
 
 type Service = { id: string; nameEn: string; nameGu: string; durationMinutes: number; priceInr: number; enabled: number }
 type Barber = { id: string; name: string; onDuty: number }

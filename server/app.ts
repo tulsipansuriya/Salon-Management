@@ -2,9 +2,10 @@ import express from 'express'
 import cors from 'cors'
 import { db } from './db'
 import { randomUUID } from 'node:crypto'
+import { allowedClientOrigins } from './cors'
 
 export const app = express()
-app.use(cors())
+app.use(cors({ origin: allowedClientOrigins }))
 app.use(express.json())
 
 const ACTIVE_STATUSES = ['Waiting', 'Called', 'In Chair']

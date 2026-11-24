@@ -2,9 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { io } from 'socket.io-client'
 import { useLanguage } from '../i18n/LanguageContext'
+import { API_BASE } from '../lib/api'
 import './customer.css'
-
-const API_BASE = 'http://localhost:3001'
 
 type Service = { id: string; nameEn: string; nameGu: string; durationMinutes: number; priceInr: number }
 type Barber = { id: string; name: string; status: 'Free' | 'Busy' | 'On Break' }

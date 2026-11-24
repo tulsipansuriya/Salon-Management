@@ -2,10 +2,9 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { io } from 'socket.io-client'
 import { useLanguage } from '../i18n/LanguageContext'
+import { API_BASE } from '../lib/api'
 import type { TranslationKey } from '../i18n/translations'
 import './barber.css'
-
-const API_BASE = 'http://localhost:3001'
 type Service = { id: string; nameEn: string; nameGu: string }
 type BarberViewData = {
   barber: { id: string; name: string; onBreak: boolean; status: string }

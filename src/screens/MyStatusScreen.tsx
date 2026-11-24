@@ -2,10 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { io } from 'socket.io-client'
 import { useLanguage } from '../i18n/LanguageContext'
+import { API_BASE } from '../lib/api'
 import type { TranslationKey } from '../i18n/translations'
 import './status.css'
-
-const API_BASE = 'http://localhost:3001'
 
 type BookingStatus = {
   id: string
