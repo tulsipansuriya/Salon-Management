@@ -45,6 +45,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS queue_day_idx ON queue_entries(token_day, token_number);
 `)
 
+const queueColumns = db.prepare('PRAGMA table_info(queue_entries)').all() as { name: string }[]
+if (!queueColumns.some((column) => column.name === 'assigned_barber')) {
+  db.exec('ALTER TABLE queue_entries ADD COLUMN assigned_barber TEXT')
+}
+
 const seedServices = db.prepare(`INSERT OR IGNORE INTO services
   (id, name_en, name_gu, duration_minutes, price_inr) VALUES (?, ?, ?, ?, ?)`)
 const seedBarber = db.prepare('INSERT OR IGNORE INTO barbers (id, name) VALUES (?, ?)')

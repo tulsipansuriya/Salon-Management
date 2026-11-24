@@ -31,6 +31,52 @@ const queueSnapshot = () => {
   }
 }
 
+const getBookingStatus = (id: string) => {
+  const entry = db.prepare(`SELECT id, token, customer_name AS customerName, service_ids AS serviceIds,
+    preferred_barber AS preferredBarber, assigned_barber AS assignedBarber, status, duration_minutes AS durationMinutes
+    FROM queue_entries WHERE id = ?`).get(id) as {
+      id: string; token: string; customerName: string; serviceIds: string; preferredBarber: string | null;
+      assignedBarber: string | null; status: string; durationMinutes: number;
+    } | undefined
+  if (!entry) return null
+
+  const servicesIds = JSON.parse(entry.serviceIds) as string[]
+  const serviceRows = servicesIds.length
+    ? db.prepare(`SELECT id, name_en AS nameEn, name_gu AS nameGu FROM services WHERE id IN (${servicesIds.map(() => '?').join(',')})`).all(...servicesIds) as { id: string; nameEn: string; nameGu: string }[]
+    : []
+  const serviceMap = new Map(serviceRows.map((service) => [service.id, service]))
+  const services = servicesIds.map((serviceId) => serviceMap.get(serviceId)).filter((service) => service !== undefined)
+
+  let queuePosition: number | null = null
+  let estimatedWaitMinutes = 0
+  if (entry.status === 'Waiting') {
+    const waiting = db.prepare(`SELECT id, duration_minutes AS durationMinutes FROM queue_entries WHERE status = 'Waiting' ORDER BY token_day, token_number`).all() as { id: string; durationMinutes: number }[]
+    const positionIndex = waiting.findIndex((customer) => customer.id === id)
+    if (positionIndex >= 0) {
+      queuePosition = positionIndex + 1
+      const minutesAhead = waiting.slice(0, positionIndex).reduce((sum, customer) => sum + customer.durationMinutes, 0)
+      const capacity = queueSnapshot().availableBarberCount
+      const freeBarbers = queueSnapshot().barbers as { name: string; status: string }[]
+      const matchingBarberIsFree = entry.preferredBarber
+        ? freeBarbers.some((barber) => barber.name === entry.preferredBarber && barber.status === 'Free')
+        : freeBarbers.some((barber) => barber.status === 'Free')
+      estimatedWaitMinutes = matchingBarberIsFree || capacity === 0 ? 0 : Math.ceil(minutesAhead / capacity)
+    }
+  }
+  return {
+    id: entry.id,
+    token: entry.token,
+    customerName: entry.customerName,
+    services,
+    preferredBarber: entry.preferredBarber,
+    barberName: entry.assignedBarber ?? entry.preferredBarber,
+    status: entry.status,
+    queuePosition,
+    estimatedWaitMinutes,
+    durationMinutes: entry.durationMinutes,
+  }
+}
+
 app.get('/api/bootstrap', (_request, response) => {
   response.json({
     services: db.prepare('SELECT id, name_en AS nameEn, name_gu AS nameGu, duration_minutes AS durationMinutes, price_inr AS priceInr FROM services WHERE enabled = 1 ORDER BY rowid').all(),
@@ -76,6 +122,22 @@ app.post('/api/bookings', (request, response) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, token, today, tokenNumber, name, phone, JSON.stringify(serviceIds), durationMinutes, priceInr, preferredBarber)
   request.app.get('io')?.emit('queue:update', queueSnapshot())
   return response.status(201).json({ id, token, durationMinutes, priceInr, estimatedWaitMinutes: waitMinutes })
+})
+
+app.get('/api/bookings/:id', (request, response) => {
+  const booking = getBookingStatus(request.params.id)
+  if (!booking) return response.status(404).json({ error: 'BOOKING_NOT_FOUND' })
+  return response.json(booking)
+})
+
+app.post('/api/bookings/:id/cancel', (request, response) => {
+  const booking = db.prepare('SELECT status FROM queue_entries WHERE id = ?').get(request.params.id) as { status: string } | undefined
+  if (!booking) return response.status(404).json({ error: 'BOOKING_NOT_FOUND' })
+  if (booking.status !== 'Waiting') return response.status(400).json({ error: 'CANCELLATION_NOT_ALLOWED' })
+  db.prepare("UPDATE queue_entries SET status = 'Cancelled' WHERE id = ? AND status = 'Waiting'").run(request.params.id)
+  const updatedBooking = getBookingStatus(request.params.id)
+  request.app.get('io')?.emit('queue:update', queueSnapshot())
+  return response.json(updatedBooking)
 })
 
 app.get('/api/health', (_request, response) => {
