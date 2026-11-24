@@ -5,6 +5,7 @@ import { app } from './app'
 const port = Number(process.env.PORT ?? 3001)
 const httpServer = createServer(app)
 export const io = new Server(httpServer, { cors: { origin: process.env.CLIENT_ORIGIN ?? 'http://localhost:5173' } })
+app.set('io', io)
 
 io.on('connection', (socket) => {
   socket.emit('connected', { status: 'ok' })

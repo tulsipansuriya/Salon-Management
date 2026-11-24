@@ -26,7 +26,7 @@ const queueSnapshot = () => {
       CASE WHEN b.on_break = 1 THEN 'On Break'
         WHEN EXISTS (SELECT 1 FROM queue_entries q WHERE q.preferred_barber = b.name AND q.status IN ('Called', 'In Chair')) THEN 'Busy'
         ELSE 'Free' END AS status
-      FROM barbers b WHERE b.on_duty = 1 ORDER BY b.name`).all(),
+      FROM barbers b WHERE b.on_duty = 1 ORDER BY CASE b.name WHEN 'Ravi' THEN 0 WHEN 'Amit' THEN 1 WHEN 'Imran' THEN 2 ELSE 3 END`).all(),
     onlineQueueOpen: isOnlineQueueOpen(),
   }
 }
@@ -43,7 +43,7 @@ app.post('/api/bookings', (request, response) => {
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   const phone = typeof body.phone === 'string' ? body.phone.trim() : ''
   const serviceIds = body.serviceIds
-  const preferredBarber = body.preferredBarber === 'Any' ? null : body.preferredBarber
+  const preferredBarber = body.preferredBarber == null || body.preferredBarber === 'Any' ? null : body.preferredBarber
   if (!name) return response.status(400).json({ error: 'NAME_REQUIRED' })
   if (!/^\d{10}$/.test(phone)) return response.status(400).json({ error: 'INVALID_PHONE' })
   if (!Array.isArray(serviceIds) || serviceIds.length < 1 || serviceIds.length > 3 || serviceIds.some((id) => typeof id !== 'string') || new Set(serviceIds).size !== serviceIds.length) {
@@ -52,11 +52,10 @@ app.post('/api/bookings', (request, response) => {
   if (preferredBarber !== null && (typeof preferredBarber !== 'string' || !db.prepare('SELECT 1 FROM barbers WHERE name = ? AND on_duty = 1').get(preferredBarber))) {
     return response.status(400).json({ error: 'INVALID_BARBER' })
   }
-  if (!isOnlineQueueOpen()) return response.status(403).json({ error: 'QUEUE_CLOSED' })
-
   const duplicate = db.prepare(`SELECT id, token FROM queue_entries WHERE phone = ? AND status IN (?, ?, ?) ORDER BY token_day DESC, token_number DESC LIMIT 1`)
     .get(phone, ...ACTIVE_STATUSES) as { id: string; token: string } | undefined
   if (duplicate) return response.status(409).json({ error: 'DUPLICATE_ACTIVE_PHONE', existingId: duplicate.id, token: duplicate.token })
+  if (!isOnlineQueueOpen()) return response.status(403).json({ error: 'QUEUE_CLOSED' })
 
   const placeholders = serviceIds.map(() => '?').join(',')
   const services = db.prepare(`SELECT id, duration_minutes, price_inr FROM services WHERE enabled = 1 AND id IN (${placeholders})`).all(...serviceIds) as { id: string; duration_minutes: number; price_inr: number }[]

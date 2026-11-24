@@ -30,7 +30,8 @@ function useQueueData() {
     void refresh()
     const socket = io(API_BASE, { reconnection: true })
     socket.on('queue:update', refresh)
-    return () => { mounted = false; socket.disconnect() }
+    const refreshTimer = window.setInterval(refresh, 30_000)
+    return () => { mounted = false; window.clearInterval(refreshTimer); socket.disconnect() }
   }, [])
   return { data, failed }
 }
