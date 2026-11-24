@@ -3,6 +3,8 @@ import { useLanguage } from './i18n/LanguageContext'
 import { HomeScreen, JoinQueueScreen } from './screens/CustomerScreens'
 import { MyStatusScreen } from './screens/MyStatusScreen'
 import { ReceptionScreen } from './screens/ReceptionScreen'
+import { BarberViewScreen } from './screens/BarberViewScreen'
+import { WaitingAreaDisplay } from './screens/WaitingAreaDisplay'
 
 type ScreenProps = { titleKey: 'home' | 'join' | 'status' | 'reception' | 'barber' | 'display' | 'admin'; descriptionKey: 'homeDescription' | 'joinDescription' | 'statusDescription' | 'receptionDescription' | 'barberDescription' | 'displayDescription' | 'adminDescription' }
 
@@ -14,6 +16,7 @@ function Header() {
   ] as const
   const location = useLocation()
   const isDisplay = location.pathname === '/display'
+  if (isDisplay) return null
   return <header className="site-header">
     <Link className="brand" to="/">{t('salonName')}</Link>
     {!isDisplay && <button className="language-toggle" type="button" onClick={toggleLanguage} aria-label={t('language')}>{language === 'EN' ? 'GU' : 'EN'}</button>}
@@ -38,8 +41,8 @@ function App() {
     <Route path="/join" element={<JoinQueueScreen />} />
     <Route path="/status/:id" element={<MyStatusScreen />} />
     <Route path="/reception" element={<ReceptionScreen />} />
-    <Route path="/barber/:name" element={<Screen titleKey="barber" descriptionKey="barberDescription" />} />
-    <Route path="/display" element={<Screen titleKey="display" descriptionKey="displayDescription" />} />
+    <Route path="/barber/:name" element={<BarberViewScreen />} />
+    <Route path="/display" element={<WaitingAreaDisplay />} />
     <Route path="/admin" element={<Screen titleKey="admin" descriptionKey="adminDescription" />} />
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes></div>

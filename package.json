@@ -10,6 +10,7 @@
     "build": "tsc -b && vite build",
     "test:status": "node --import tsx tests/status-flow.mjs",
     "test:reception": "node --import tsx tests/reception-flow.mjs",
+    "test:barber-display": "node --import tsx tests/barber-display-flow.mjs",
     "start": "tsx server/index.ts"
   },
   "dependencies": {
