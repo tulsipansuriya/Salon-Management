@@ -5,8 +5,7 @@ import { MyStatusScreen } from './screens/MyStatusScreen'
 import { ReceptionScreen } from './screens/ReceptionScreen'
 import { BarberViewScreen } from './screens/BarberViewScreen'
 import { WaitingAreaDisplay } from './screens/WaitingAreaDisplay'
-
-type ScreenProps = { titleKey: 'home' | 'join' | 'status' | 'reception' | 'barber' | 'display' | 'admin'; descriptionKey: 'homeDescription' | 'joinDescription' | 'statusDescription' | 'receptionDescription' | 'barberDescription' | 'displayDescription' | 'adminDescription' }
+import { AdminSettingsScreen } from './screens/AdminSettingsScreen'
 
 function Header() {
   const { t, language, toggleLanguage } = useLanguage()
@@ -26,15 +25,6 @@ function Header() {
   </header>
 }
 
-function Screen({ titleKey, descriptionKey }: ScreenProps) {
-  const { t } = useLanguage()
-  return <main className="screen-shell"><section className="screen-card">
-    <p className="eyebrow">{t('salonName')}</p><h1>{t(titleKey)}</h1>
-    <p className="screen-description">{t(descriptionKey)}</p>
-    <span className="ready-badge">{t('routeReady')}</span>
-  </section></main>
-}
-
 function App() {
   return <div className="app-shell min-h-screen bg-charcoal text-white"><Header /><Routes>
     <Route path="/" element={<HomeScreen />} />
@@ -43,7 +33,7 @@ function App() {
     <Route path="/reception" element={<ReceptionScreen />} />
     <Route path="/barber/:name" element={<BarberViewScreen />} />
     <Route path="/display" element={<WaitingAreaDisplay />} />
-    <Route path="/admin" element={<Screen titleKey="admin" descriptionKey="adminDescription" />} />
+    <Route path="/admin" element={<AdminSettingsScreen />} />
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes></div>
 }

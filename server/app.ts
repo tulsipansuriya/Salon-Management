@@ -77,6 +77,101 @@ const getBookingStatus = (id: string) => {
   }
 }
 
+const salonDay = () => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(new Date())
+
+const emitQueueSnapshot = (request: express.Request) => request.app.get('io')?.emit('queue:update', queueSnapshot())
+
+app.get('/api/admin', (_request, response) => {
+  const day = salonDay()
+  const stats = db.prepare(`SELECT
+    SUM(CASE WHEN status = 'Done' THEN 1 ELSE 0 END) AS customersServed,
+    AVG(CASE WHEN called_at IS NOT NULL THEN MAX(0, (julianday(called_at) - julianday(created_at)) * 1440) END) AS averageWaitMinutes,
+    SUM(CASE WHEN status = 'No-show' THEN 1 ELSE 0 END) AS noShows
+    FROM queue_entries WHERE token_day = ?`).get(day) as {
+      customersServed: number | null; averageWaitMinutes: number | null; noShows: number | null;
+    }
+  const manualSetting = db.prepare("SELECT value FROM app_meta WHERE key = 'online_queue_open'").get() as { value: string } | undefined
+  response.json({
+    services: db.prepare(`SELECT id, name_en AS nameEn, name_gu AS nameGu,
+      duration_minutes AS durationMinutes, price_inr AS priceInr, enabled FROM services ORDER BY rowid`).all(),
+    barbers: db.prepare(`SELECT id, name, on_duty AS onDuty FROM barbers
+      ORDER BY CASE name WHEN 'Ravi' THEN 0 WHEN 'Amit' THEN 1 WHEN 'Imran' THEN 2 ELSE 3 END`).all(),
+    manualQueueOpen: manualSetting?.value === '1',
+    onlineQueueOpen: isOnlineQueueOpen(),
+    closingCutoffReached: !isOnlineQueueOpen() && new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(new Date()) >= '20:30',
+    stats: {
+      customersServed: stats.customersServed ?? 0,
+      averageWaitMinutes: stats.averageWaitMinutes === null ? 0 : Math.round(stats.averageWaitMinutes),
+      noShows: stats.noShows ?? 0,
+    },
+  })
+})
+
+app.patch('/api/admin/online-queue', (request, response) => {
+  const open = (request.body as { open?: unknown }).open
+  if (typeof open !== 'boolean') return response.status(400).json({ error: 'INVALID_QUEUE_SETTING' })
+  db.prepare(`INSERT INTO app_meta (key, value) VALUES ('online_queue_open', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(open ? '1' : '0')
+  emitQueueSnapshot(request)
+  return response.json({ manualQueueOpen: open, onlineQueueOpen: isOnlineQueueOpen() })
+})
+
+app.patch('/api/admin/barbers/:name/duty', (request, response) => {
+  const barber = findBarber(request.params.name)
+  if (!barber) return response.status(404).json({ error: 'BARBER_NOT_FOUND' })
+  const onDuty = (request.body as { onDuty?: unknown }).onDuty
+  if (typeof onDuty !== 'boolean') return response.status(400).json({ error: 'INVALID_DUTY_STATUS' })
+  if (!onDuty) {
+    const active = db.prepare(`SELECT 1 FROM queue_entries WHERE status IN ('Called', 'In Chair')
+      AND COALESCE(assigned_barber, preferred_barber) = ? LIMIT 1`).get(barber.name)
+    if (active) return response.status(409).json({ error: 'BARBER_HAS_ACTIVE_CUSTOMER' })
+  }
+  db.prepare('UPDATE barbers SET on_duty = ? WHERE id = ?').run(Number(onDuty), barber.id)
+  emitQueueSnapshot(request)
+  return response.json({ id: barber.id, name: barber.name, onDuty })
+})
+
+const normalizeServiceInput = (body: Record<string, unknown>, partial = false) => {
+  const fields: Record<string, unknown> = {}
+  if (!partial || 'nameEn' in body) fields.name_en = typeof body.nameEn === 'string' ? body.nameEn.trim() : ''
+  if (!partial || 'nameGu' in body) fields.name_gu = typeof body.nameGu === 'string' ? body.nameGu.trim() : ''
+  if (!partial || 'durationMinutes' in body) fields.duration_minutes = body.durationMinutes
+  if (!partial || 'priceInr' in body) fields.price_inr = body.priceInr
+  if ('enabled' in body) fields.enabled = body.enabled === true ? 1 : body.enabled === false ? 0 : body.enabled
+  const valid = Object.entries(fields).every(([key, value]) => {
+    if (key === 'name_en' || key === 'name_gu') return typeof value === 'string' && value.length > 0 && value.length <= 80
+    if (key === 'duration_minutes') return Number.isInteger(value) && Number(value) > 0 && Number(value) <= 600
+    if (key === 'price_inr') return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 1_000_000
+    return key === 'enabled' && (value === 0 || value === 1)
+  })
+  return valid && Object.keys(fields).length > 0 ? fields : null
+}
+
+app.post('/api/admin/services', (request, response) => {
+  const fields = normalizeServiceInput(request.body as Record<string, unknown>)
+  if (!fields) return response.status(400).json({ error: 'INVALID_SERVICE' })
+  const id = randomUUID()
+  db.prepare(`INSERT INTO services (id, name_en, name_gu, duration_minutes, price_inr, enabled)
+    VALUES (@id, @name_en, @name_gu, @duration_minutes, @price_inr, 1)`).run({ id, ...fields })
+  emitQueueSnapshot(request)
+  return response.status(201).json({ id, ...fields, enabled: 1 })
+})
+
+app.patch('/api/admin/services/:id', (request, response) => {
+  const fields = normalizeServiceInput(request.body as Record<string, unknown>, true)
+  if (!fields) return response.status(400).json({ error: 'INVALID_SERVICE' })
+  const existing = db.prepare('SELECT id FROM services WHERE id = ?').get(request.params.id)
+  if (!existing) return response.status(404).json({ error: 'SERVICE_NOT_FOUND' })
+  const updates = Object.keys(fields).map((field) => `${field} = @${field}`).join(', ')
+  db.prepare(`UPDATE services SET ${updates} WHERE id = @id`).run({ id: request.params.id, ...fields })
+  emitQueueSnapshot(request)
+  return response.json({ id: request.params.id, ...fields })
+})
+
 app.get('/api/bootstrap', (_request, response) => {
   response.json({
     services: db.prepare('SELECT id, name_en AS nameEn, name_gu AS nameGu, duration_minutes AS durationMinutes, price_inr AS priceInr FROM services WHERE enabled = 1 ORDER BY rowid').all(),
