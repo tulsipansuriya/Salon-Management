@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #f9fafb; background: #1F2937; font-synthesis: none; text-rendering: optimizeLegibility; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: #1F2937; }
+button, a { font: inherit; }
+a { color: inherit; text-decoration: none; }
+.app-shell { min-height: 100vh; }
+.site-header { display: flex; align-items: center; gap: 1rem; padding: 1rem clamp(1rem, 4vw, 3rem); border-bottom: 1px solid rgb(255 255 255 / 10%); background: #18212d; }
+.brand { color: #D4A017; font-size: 1.15rem; font-weight: 750; white-space: nowrap; }
+.language-toggle { min-width: 48px; min-height: 44px; padding: .5rem .8rem; border: 1px solid #D4A017; border-radius: .75rem; background: transparent; color: #f9fafb; font-weight: 700; cursor: pointer; }
+.screen-nav { display: flex; gap: .35rem; margin-left: auto; overflow-x: auto; }
+.screen-nav a { display: inline-flex; min-height: 44px; align-items: center; padding: .5rem .7rem; border-radius: .65rem; color: #d1d5db; white-space: nowrap; }
+.screen-nav a:hover, .screen-nav a[aria-current="page"] { background: rgb(212 160 23 / 14%); color: #f2c94c; }
+.screen-shell { display: grid; min-height: calc(100vh - 75px); place-items: center; padding: 2rem 1rem; }
+.screen-card { width: min(100%, 44rem); padding: clamp(1.5rem, 5vw, 3rem); border: 1px solid rgb(255 255 255 / 9%); border-radius: 1.5rem; background: #273445; box-shadow: 0 24px 70px rgb(0 0 0 / 22%); }
+.eyebrow { margin: 0 0 .75rem; color: #D4A017; font-size: .8rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+h1 { margin: 0; font-size: clamp(2rem, 6vw, 3rem); }
+.screen-description { margin: 1rem 0 1.5rem; color: #d1d5db; font-size: 1.05rem; line-height: 1.65; }
+.ready-badge { display: inline-block; padding: .75rem 1rem; border-radius: .75rem; background: rgb(212 160 23 / 12%); color: #f2c94c; line-height: 1.5; }
+@media (max-width: 760px) { .site-header { flex-wrap: wrap; } .screen-nav { order: 3; width: 100%; margin-left: 0; } }
