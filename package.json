@@ -9,6 +9,7 @@
     "dev:server": "tsx watch server/index.ts",
     "build": "tsc -b && vite build",
     "test:status": "node --import tsx tests/status-flow.mjs",
+    "test:reception": "node --import tsx tests/reception-flow.mjs",
     "start": "tsx server/index.ts"
   },
   "dependencies": {

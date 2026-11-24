@@ -2,6 +2,7 @@ import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useLanguage } from './i18n/LanguageContext'
 import { HomeScreen, JoinQueueScreen } from './screens/CustomerScreens'
 import { MyStatusScreen } from './screens/MyStatusScreen'
+import { ReceptionScreen } from './screens/ReceptionScreen'
 
 type ScreenProps = { titleKey: 'home' | 'join' | 'status' | 'reception' | 'barber' | 'display' | 'admin'; descriptionKey: 'homeDescription' | 'joinDescription' | 'statusDescription' | 'receptionDescription' | 'barberDescription' | 'displayDescription' | 'adminDescription' }
 
@@ -36,7 +37,7 @@ function App() {
     <Route path="/" element={<HomeScreen />} />
     <Route path="/join" element={<JoinQueueScreen />} />
     <Route path="/status/:id" element={<MyStatusScreen />} />
-    <Route path="/reception" element={<Screen titleKey="reception" descriptionKey="receptionDescription" />} />
+    <Route path="/reception" element={<ReceptionScreen />} />
     <Route path="/barber/:name" element={<Screen titleKey="barber" descriptionKey="barberDescription" />} />
     <Route path="/display" element={<Screen titleKey="display" descriptionKey="displayDescription" />} />
     <Route path="/admin" element={<Screen titleKey="admin" descriptionKey="adminDescription" />} />

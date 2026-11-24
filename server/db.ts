@@ -46,8 +46,12 @@ db.exec(`
 `)
 
 const queueColumns = db.prepare('PRAGMA table_info(queue_entries)').all() as { name: string }[]
-if (!queueColumns.some((column) => column.name === 'assigned_barber')) {
-  db.exec('ALTER TABLE queue_entries ADD COLUMN assigned_barber TEXT')
+const queueColumnNames = new Set(queueColumns.map((column) => column.name))
+for (const [column, type] of [
+  ['assigned_barber', 'TEXT'], ['called_at', 'TEXT'], ['service_started_at', 'TEXT'],
+  ['finished_at', 'TEXT'], ['no_show_at', 'TEXT'], ['cancelled_at', 'TEXT'],
+] as const) {
+  if (!queueColumnNames.has(column)) db.exec(`ALTER TABLE queue_entries ADD COLUMN ${column} ${type}`)
 }
 
 const seedServices = db.prepare(`INSERT OR IGNORE INTO services

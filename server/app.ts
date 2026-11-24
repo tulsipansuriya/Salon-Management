@@ -24,7 +24,7 @@ const queueSnapshot = () => {
     estimatedWaitMinutes: waiting.length === 0 || capacity.count === 0 ? 0 : Math.ceil(waitingMinutes / capacity.count),
     barbers: db.prepare(`SELECT b.id, b.name,
       CASE WHEN b.on_break = 1 THEN 'On Break'
-        WHEN EXISTS (SELECT 1 FROM queue_entries q WHERE q.preferred_barber = b.name AND q.status IN ('Called', 'In Chair')) THEN 'Busy'
+        WHEN EXISTS (SELECT 1 FROM queue_entries q WHERE (q.assigned_barber = b.name OR q.preferred_barber = b.name) AND q.status IN ('Called', 'In Chair')) THEN 'Busy'
         ELSE 'Free' END AS status
       FROM barbers b WHERE b.on_duty = 1 ORDER BY CASE b.name WHEN 'Ravi' THEN 0 WHEN 'Amit' THEN 1 WHEN 'Imran' THEN 2 ELSE 3 END`).all(),
     onlineQueueOpen: isOnlineQueueOpen(),
@@ -84,44 +84,153 @@ app.get('/api/bootstrap', (_request, response) => {
   })
 })
 
-app.post('/api/bookings', (request, response) => {
-  const body = request.body as { name?: unknown; phone?: unknown; serviceIds?: unknown; preferredBarber?: unknown }
+type QueueInput = { name?: unknown; phone?: unknown; serviceIds?: unknown; preferredBarber?: unknown }
+type QueueCreateResult = { status: number; body: Record<string, unknown>; created?: boolean }
+
+const createQueueEntry = (body: QueueInput, allowClosed: boolean): QueueCreateResult => {
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   const phone = typeof body.phone === 'string' ? body.phone.trim() : ''
   const serviceIds = body.serviceIds
   const preferredBarber = body.preferredBarber == null || body.preferredBarber === 'Any' ? null : body.preferredBarber
-  if (!name) return response.status(400).json({ error: 'NAME_REQUIRED' })
-  if (!/^\d{10}$/.test(phone)) return response.status(400).json({ error: 'INVALID_PHONE' })
+  if (!name) return { status: 400, body: { error: 'NAME_REQUIRED' } }
+  if (!/^\d{10}$/.test(phone)) return { status: 400, body: { error: 'INVALID_PHONE' } }
   if (!Array.isArray(serviceIds) || serviceIds.length < 1 || serviceIds.length > 3 || serviceIds.some((id) => typeof id !== 'string') || new Set(serviceIds).size !== serviceIds.length) {
-    return response.status(400).json({ error: 'INVALID_SERVICE_COUNT' })
+    return { status: 400, body: { error: 'INVALID_SERVICE_COUNT' } }
   }
   if (preferredBarber !== null && (typeof preferredBarber !== 'string' || !db.prepare('SELECT 1 FROM barbers WHERE name = ? AND on_duty = 1').get(preferredBarber))) {
-    return response.status(400).json({ error: 'INVALID_BARBER' })
+    return { status: 400, body: { error: 'INVALID_BARBER' } }
   }
-  const duplicate = db.prepare(`SELECT id, token FROM queue_entries WHERE phone = ? AND status IN (?, ?, ?) ORDER BY token_day DESC, token_number DESC LIMIT 1`)
-    .get(phone, ...ACTIVE_STATUSES) as { id: string; token: string } | undefined
-  if (duplicate) return response.status(409).json({ error: 'DUPLICATE_ACTIVE_PHONE', existingId: duplicate.id, token: duplicate.token })
-  if (!isOnlineQueueOpen()) return response.status(403).json({ error: 'QUEUE_CLOSED' })
+  const selectedServiceIds = serviceIds as string[]
+  return db.transaction((): QueueCreateResult => {
+    const duplicate = db.prepare(`SELECT id, token FROM queue_entries WHERE phone = ? AND status IN (?, ?, ?) ORDER BY token_day DESC, token_number DESC LIMIT 1`)
+      .get(phone, ...ACTIVE_STATUSES) as { id: string; token: string } | undefined
+    if (duplicate) return { status: 409, body: { error: 'DUPLICATE_ACTIVE_PHONE', existingId: duplicate.id, token: duplicate.token } }
+    if (!allowClosed && !isOnlineQueueOpen()) return { status: 403, body: { error: 'QUEUE_CLOSED' } }
 
-  const placeholders = serviceIds.map(() => '?').join(',')
-  const services = db.prepare(`SELECT id, duration_minutes, price_inr FROM services WHERE enabled = 1 AND id IN (${placeholders})`).all(...serviceIds) as { id: string; duration_minutes: number; price_inr: number }[]
-  if (services.length !== serviceIds.length) return response.status(400).json({ error: 'INVALID_SERVICES' })
-  const durationMinutes = services.reduce((sum, service) => sum + service.duration_minutes, 0)
-  const priceInr = services.reduce((sum, service) => sum + service.price_inr, 0)
-  const snapshot = queueSnapshot()
-  const selectedBarber = preferredBarber ? snapshot.barbers.find((barber) => (barber as { name: string }).name === preferredBarber) as { status: string } | undefined : undefined
-  const waitMinutes = preferredBarber
-    ? (selectedBarber?.status === 'Free' ? 0 : snapshot.waitingTotalMinutes)
-    : snapshot.estimatedWaitMinutes
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-  const lastToken = db.prepare('SELECT MAX(token_number) AS number FROM queue_entries WHERE token_day = ?').get(today) as { number: number | null }
-  const tokenNumber = (lastToken.number ?? 0) + 1
-  const id = randomUUID()
-  const token = `S-${tokenNumber}`
-  db.prepare(`INSERT INTO queue_entries (id, token, token_day, token_number, customer_name, phone, service_ids, duration_minutes, price_inr, preferred_barber)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, token, today, tokenNumber, name, phone, JSON.stringify(serviceIds), durationMinutes, priceInr, preferredBarber)
-  request.app.get('io')?.emit('queue:update', queueSnapshot())
-  return response.status(201).json({ id, token, durationMinutes, priceInr, estimatedWaitMinutes: waitMinutes })
+    const placeholders = selectedServiceIds.map(() => '?').join(',')
+    const services = db.prepare(`SELECT id, duration_minutes, price_inr FROM services WHERE enabled = 1 AND id IN (${placeholders})`).all(...selectedServiceIds) as { id: string; duration_minutes: number; price_inr: number }[]
+    if (services.length !== selectedServiceIds.length) return { status: 400, body: { error: 'INVALID_SERVICES' } }
+    const durationMinutes = services.reduce((sum, service) => sum + service.duration_minutes, 0)
+    const priceInr = services.reduce((sum, service) => sum + service.price_inr, 0)
+    const snapshot = queueSnapshot()
+    const selectedBarber = preferredBarber ? snapshot.barbers.find((barber) => (barber as { name: string }).name === preferredBarber) as { status: string } | undefined : undefined
+    const waitMinutes = preferredBarber
+      ? (selectedBarber?.status === 'Free' ? 0 : snapshot.waitingTotalMinutes)
+      : snapshot.estimatedWaitMinutes
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+    const lastToken = db.prepare('SELECT MAX(token_number) AS number FROM queue_entries WHERE token_day = ?').get(today) as { number: number | null }
+    const tokenNumber = (lastToken.number ?? 0) + 1
+    const id = randomUUID()
+    const token = `S-${tokenNumber}`
+    db.prepare(`INSERT INTO queue_entries (id, token, token_day, token_number, customer_name, phone, service_ids, duration_minutes, price_inr, preferred_barber)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, token, today, tokenNumber, name, phone, JSON.stringify(selectedServiceIds), durationMinutes, priceInr, preferredBarber)
+    return { status: 201, created: true, body: { id, token, durationMinutes, priceInr, estimatedWaitMinutes: waitMinutes } }
+  })()
+}
+
+const notifyQueueUpdate = (request: express.Request) => request.app.get('io')?.emit('queue:update', queueSnapshot())
+
+app.post('/api/bookings', (request, response) => {
+  const result = createQueueEntry(request.body as QueueInput, false)
+  if (result.created) notifyQueueUpdate(request)
+  return response.status(result.status).json(result.body)
+})
+
+app.post('/api/reception/walk-ins', (request, response) => {
+  const result = createQueueEntry(request.body as QueueInput, true)
+  if (result.created) notifyQueueUpdate(request)
+  return response.status(result.status).json(result.body)
+})
+
+const elapsedSeconds = (timestamp: string | null | undefined) => {
+  if (!timestamp) return 0
+  const normalizedTimestamp = timestamp.includes('T') ? timestamp : `${timestamp.replace(' ', 'T')}Z`
+  return Math.max(0, Math.floor((Date.now() - Date.parse(normalizedTimestamp)) / 1000))
+}
+
+app.get('/api/reception', (_request, response) => {
+  const barbers = db.prepare('SELECT id, name, on_break AS onBreak FROM barbers WHERE on_duty = 1 ORDER BY CASE name WHEN \'Ravi\' THEN 0 WHEN \'Amit\' THEN 1 WHEN \'Imran\' THEN 2 ELSE 3 END').all() as { id: string; name: string; onBreak: number }[]
+  const activeRows = db.prepare(`SELECT id, token, customer_name AS customerName, status, preferred_barber AS preferredBarber,
+    COALESCE(assigned_barber, preferred_barber) AS assignedBarber, called_at AS calledAt, service_started_at AS serviceStartedAt
+    FROM queue_entries WHERE status IN ('Called', 'In Chair') ORDER BY token_day, token_number`).all() as {
+      id: string; token: string; customerName: string; status: string; preferredBarber: string | null;
+      assignedBarber: string | null; calledAt: string | null; serviceStartedAt: string | null;
+    }[]
+  const queueRows = db.prepare(`SELECT id, token, customer_name AS customerName, phone, service_ids AS serviceIds,
+    preferred_barber AS preferredBarber, assigned_barber AS assignedBarber, status, created_at AS createdAt,
+    called_at AS calledAt FROM queue_entries WHERE status IN ('Waiting', 'Called') ORDER BY token_day, token_number`).all() as {
+      id: string; token: string; customerName: string; phone: string; serviceIds: string; preferredBarber: string | null;
+      assignedBarber: string | null; status: string; createdAt: string; calledAt: string | null;
+    }[]
+  const servicesFor = (idsJson: string) => {
+    const ids = JSON.parse(idsJson) as string[]
+    if (!ids.length) return []
+    const rows = db.prepare(`SELECT id, name_en AS nameEn, name_gu AS nameGu FROM services WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids) as { id: string; nameEn: string; nameGu: string }[]
+    const byId = new Map(rows.map((service) => [service.id, service]))
+    return ids.map((id) => byId.get(id)).filter((service) => service !== undefined)
+  }
+  const activeByBarber = new Map(activeRows.map((entry) => [entry.assignedBarber, entry]))
+  response.json({
+    barbers: barbers.map((barber) => {
+      const active = activeByBarber.get(barber.name)
+      const startedAt = active?.status === 'In Chair' ? active.serviceStartedAt : null
+      return {
+        id: barber.id, name: barber.name,
+        status: barber.onBreak ? 'On Break' : active ? 'Busy' : 'Free',
+        currentCustomer: active ? { id: active.id, token: active.token, name: active.customerName, status: active.status, elapsedSeconds: elapsedSeconds(startedAt) } : null,
+      }
+    }),
+    waitingQueue: queueRows.map((entry) => ({
+      id: entry.id, token: entry.token, customerName: entry.customerName, phone: entry.phone,
+      services: servicesFor(entry.serviceIds), preferredBarber: entry.preferredBarber,
+      assignedBarber: entry.assignedBarber, status: entry.status,
+      waitingSeconds: elapsedSeconds(entry.createdAt),
+    })),
+  })
+})
+
+const callNextTransaction = db.transaction((barberName: string): { status: number; body: Record<string, unknown> } => {
+  const barber = db.prepare('SELECT id, on_duty AS onDuty, on_break AS onBreak FROM barbers WHERE name = ?').get(barberName) as { id: string; onDuty: number; onBreak: number } | undefined
+  if (!barber || !barber.onDuty) return { status: 404, body: { error: 'BARBER_NOT_AVAILABLE' } }
+  if (barber.onBreak) return { status: 409, body: { error: 'BARBER_ON_BREAK' } }
+  const active = db.prepare("SELECT 1 FROM queue_entries WHERE (assigned_barber = ? OR (assigned_barber IS NULL AND preferred_barber = ?)) AND status IN ('Called', 'In Chair')").get(barberName, barberName)
+  if (active) return { status: 409, body: { error: 'BARBER_HAS_ACTIVE_CUSTOMER' } }
+  const next = db.prepare(`SELECT id FROM queue_entries WHERE status = 'Waiting'
+    AND (preferred_barber IS NULL OR preferred_barber = ?) ORDER BY token_day, token_number LIMIT 1`).get(barberName) as { id: string } | undefined
+  if (!next) return { status: 404, body: { error: 'NO_ELIGIBLE_CUSTOMER' } }
+  db.prepare("UPDATE queue_entries SET status = 'Called', assigned_barber = ?, called_at = ? WHERE id = ? AND status = 'Waiting'")
+    .run(barberName, new Date().toISOString(), next.id)
+  return { status: 200, body: getBookingStatus(next.id)! }
+})
+
+app.post('/api/barbers/:name/call-next', (request, response) => {
+  const barberName = String(request.params.name).replace(/^./, (letter) => letter.toUpperCase())
+  const result = callNextTransaction(barberName)
+  if (result.status === 200) notifyQueueUpdate(request)
+  return response.status(result.status).json(result.body)
+})
+
+const allowedTransitions: Record<string, string[]> = {
+  Waiting: ['Cancelled'], Called: ['In Chair', 'No-show'], 'In Chair': ['Done'],
+}
+const transitionColumn: Record<string, string> = {
+  'In Chair': 'service_started_at', Done: 'finished_at', 'No-show': 'no_show_at', Cancelled: 'cancelled_at',
+}
+
+app.post('/api/queue/:id/transition', (request, response) => {
+  const nextStatus = (request.body as { status?: unknown }).status
+  if (typeof nextStatus !== 'string' || !transitionColumn[nextStatus]) return response.status(400).json({ error: 'INVALID_TRANSITION' })
+  const result = db.transaction(() => {
+    const current = db.prepare('SELECT status FROM queue_entries WHERE id = ?').get(request.params.id) as { status: string } | undefined
+    if (!current) return { status: 404, body: { error: 'BOOKING_NOT_FOUND' } }
+    if (!allowedTransitions[current.status]?.includes(nextStatus)) return { status: 400, body: { error: 'INVALID_TRANSITION', from: current.status, to: nextStatus } }
+    const column = transitionColumn[nextStatus]
+    db.prepare(`UPDATE queue_entries SET status = ?, ${column} = ? WHERE id = ? AND status = ?`)
+      .run(nextStatus, new Date().toISOString(), request.params.id, current.status)
+    return { status: 200, body: getBookingStatus(request.params.id)! }
+  })()
+  if (result.status === 200) notifyQueueUpdate(request)
+  return response.status(result.status).json(result.body)
 })
 
 app.get('/api/bookings/:id', (request, response) => {
@@ -134,7 +243,7 @@ app.post('/api/bookings/:id/cancel', (request, response) => {
   const booking = db.prepare('SELECT status FROM queue_entries WHERE id = ?').get(request.params.id) as { status: string } | undefined
   if (!booking) return response.status(404).json({ error: 'BOOKING_NOT_FOUND' })
   if (booking.status !== 'Waiting') return response.status(400).json({ error: 'CANCELLATION_NOT_ALLOWED' })
-  db.prepare("UPDATE queue_entries SET status = 'Cancelled' WHERE id = ? AND status = 'Waiting'").run(request.params.id)
+  db.prepare("UPDATE queue_entries SET status = 'Cancelled', cancelled_at = ? WHERE id = ? AND status = 'Waiting'").run(new Date().toISOString(), request.params.id)
   const updatedBooking = getBookingStatus(request.params.id)
   request.app.get('io')?.emit('queue:update', queueSnapshot())
   return response.json(updatedBooking)
