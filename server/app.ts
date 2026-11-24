@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import { db } from './db'
 import { randomUUID } from 'node:crypto'
+import { resolve } from 'node:path'
 import { allowedClientOrigins } from './cors'
 
 export const app = express()
@@ -462,3 +463,14 @@ app.get('/api/health', (_request, response) => {
   const database = db.prepare('SELECT 1 AS ok').get() as { ok: number }
   response.json({ status: 'ok', service: 'salon-queue-api', database: database.ok === 1 ? 'connected' : 'unavailable' })
 })
+
+if (process.env.NODE_ENV === 'production') {
+  const frontendDist = resolve(process.cwd(), 'dist')
+  const frontendIndex = resolve(frontendDist, 'index.html')
+  app.use(express.static(frontendDist))
+  app.get(/^(?!\/api(?:\/|$)).*/, (_request, response, next) => {
+    response.sendFile(frontendIndex, (error) => {
+      if (error) next(error)
+    })
+  })
+}

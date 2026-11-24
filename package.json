@@ -13,6 +13,7 @@
     "test:reception": "node --import tsx tests/reception-flow.mjs",
     "test:barber-display": "node --import tsx tests/barber-display-flow.mjs",
     "test:admin": "node --import tsx tests/admin-flow.mjs",
+    "test:production-serving": "node --import tsx tests/production-serving.mjs",
     "start": "tsx server/index.ts"
   },
   "dependencies": {
